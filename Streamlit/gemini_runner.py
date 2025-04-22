@@ -4,19 +4,20 @@ from cvzone.HandTrackingModule import HandDetector
 from PIL import Image
 import base64
 from google import genai
+import time
 
-# Set up Gemini API
-client = genai.Client(api_key="YOUR_API_KEY_HERE")  # <-- Replace with your actual key or load via env
-
+# Initialize Gemini Client
+client = genai.Client(api_key="AIzaSyCGA0SzK_-hjMsDZGh7vGJHOpO9RwTEtuE")  # Replace with your actual key
+# Convert image to base64
 def encode_image_to_base64(canvas):
-    """Convert image (OpenCV) to base64 for Gemini API."""
     _, buffer = cv2.imencode('.png', canvas)
     base64_img = base64.b64encode(buffer).decode('utf-8')
     return base64_img
 
+# Get response from Gemini
 def get_gemini_response(canvas):
-    """Send canvas image to Gemini API and get response."""
     try:
+        print("[INFO] Encoding canvas and calling Gemini API...")
         base64_img = encode_image_to_base64(canvas)
         response = client.models.generate_content(
             model="gemini-1.5-flash",
@@ -37,20 +38,35 @@ def get_gemini_response(canvas):
                 }
             ]
         )
+        print("[INFO] Gemini API responded.")
         return response.text.strip()
     except Exception as e:
+        print("[ERROR] Gemini API failed:", e)
         return f"Gemini API Error: {e}"
 
-def run_gemini_mode():
-    """Launch webcam and use Gemini API for prediction."""
+# Webcam and canvas setup
+def run_gemini_calculator():
+    # print("[INFO] Starting webcam...")
     cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print("[ERROR] Could not open webcam. Check if it’s in use or not connected.")
+        return
+
     detector = HandDetector(maxHands=1)
     canvas = None
     prev_pos = None
     display_text = ""
 
+    # print("[INFO] Webcam started successfully.")
+    time.sleep(1)
+
     while True:
         success, img = cap.read()
+        if not success:
+            print("[WARNING] Failed to read frame from webcam.")
+            continue
+
         img = cv2.flip(img, 1)
 
         if canvas is None:
@@ -58,11 +74,13 @@ def run_gemini_mode():
 
         hands, img = detector.findHands(img, draw=True, flipType=True)
         if hands:
+            print("[INFO] Hand detected.")
             hand = hands[0]
             lmList = hand["lmList"]
             fingers = detector.fingersUp(hand)
+            # print("[DEBUG] Fingers up:", fingers)
 
-            # Drawing with index finger
+            # Drawing
             if fingers == [0, 1, 0, 0, 0]:
                 current_pos = lmList[8][0:2]
                 if prev_pos is None:
@@ -74,20 +92,22 @@ def run_gemini_mode():
 
             # Clear canvas
             if fingers == [1, 1, 1, 1, 1]:
+                # print("[ACTION] Clearing canvas.")
                 canvas = np.zeros_like(img)
                 display_text = ""
 
-            # Erase with 4 fingers
+            # Erase
             if fingers == [0, 1, 1, 1, 1]:
+                # print("[ACTION] Erasing.")
                 eraser_pos = lmList[8][0:2]
                 cv2.circle(canvas, tuple(eraser_pos), 20, (0, 0, 0), -1)
 
-            # Trigger Gemini: Index + Pinky
+            # Trigger Gemini
             if fingers == [0, 1, 0, 0, 1]:
+                # print("[ACTION] Sending /canvas to Gemini API.")
                 display_text = get_gemini_response(canvas)
-                print("Gemini Response:", display_text)
+                # print("[RESULT]", display_text)
 
-        # Overlay canvas + result
         combined = cv2.addWeighted(img, 0.7, canvas, 0.3, 0)
         if display_text:
             cv2.putText(combined, display_text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 3)
@@ -96,11 +116,13 @@ def run_gemini_mode():
         cv2.imshow("Real-Time", combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
+            # print("[INFO] Quitting...")
             break
 
     cap.release()
     cv2.destroyAllWindows()
+    print("[INFO] Camera and windows released.")
 
-# When running this script directly
+# Entry point
 if __name__ == "__main__":
-    run_gemini_mode()
+    run_gemini_calculator()
